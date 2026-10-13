@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抽签分组（联网同步版）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
+  body { min-height:100vh; background:linear-gradient(135deg,#1e3c72,#2a5298); display:flex; flex-direction:column; align-items:center; padding:20px; color:#fff; }
+  h1 { font-size:22px; margin:6px 0 2px; text-align:center; }
+  .subtitle { font-size:13px; opacity:.8; margin-bottom:14px; text-align:center; }
+  .panel { width:100%; max-width:480px; background:rgba(255,255,255,.1); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { font-size:13px; display:block; margin:10px 0 4px; opacity:.9; }
+  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.3); background:rgba(255,255,255,.95); color:#333; font-size:15px; }
+  button { border:none; padding:11px 24px; border-radius:24px; font-size:15px; cursor:pointer; transition:.2s; margin-top:6px; }
+  .btn-main { background:#ffb347; color:#333; font-weight:bold; width:100%; margin-top:16px; }
+  .btn-main:hover { background:#ffc966; }
+  .btn-small { background:rgba(255,255,255,.2); color:#fff; font-size:13px; padding:8px 16px; }
+  .btn-danger { background:rgba(255,80,80,.7); color:#fff; font-size:13px; padding:8px 16px; }
+  .hidden { display:none !important; }
+  .mybar { width:100%; max-width:480px; display:flex; gap:8px; margin-bottom:14px; }
+  .mybar input { flex:1; }
+  .btn-draw { background:#ffb347; color:#333; font-weight:bold; white-space:nowrap; }
+  .status { font-size:13px; margin-bottom:10px; }
+  .status b { color:#ffd27f; }
+  .groups { width:100%; max-width:480px; display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:14px; }
+  .group { background:rgba(255,255,255,.12); border-radius:12px; padding:10px; min-height:64px; }
+  .group h3 { font-size:15px; color:#ffd27f; margin-bottom:4px; }
+  .group p { font-size:14px; line-height:1.6; }
+  .me { color:#7CFC98; font-weight:bold; }
+  .share { font-size:12px; word-break:break-all; background:rgba(0,0,0,.25); padding:8px; border-radius:8px; margin-top:10px; line-height:1.5; }
+  .tip { font-size:12px; opacity:.7; margin-top:8px; line-height:1.6; }
+  .topbar { width:100%; max-width:480px; display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; font-size:13px; }
+</style>
+</head>
+<body>
+  <h1>🎲 抽签分组 · 联网同步版</h1>
+  <p class="subtitle">1~6 号各 2 个，号码相同者同组，全员实时同步</p>
+
+  <!-- 设置页 -->
+  <div class="panel" id="setupPanel">
+    <div style="font-size:15px; margin-bottom:6px;">首次使用：填写云服务参数（只填一次）</div>
+    <label>AppID（ LeanCloud 后台"应用凭证"里复制）</label>
+    <input id="appId" placeholder="例如：AbCdEfG123456789">
+    <label>AppKey</label>
+    <input id="appKey" placeholder="例如：xyzXYZ789456123">
+    <label>房间号（自己起个独特的名字，字母或数字）</label>
+    <input id="room" placeholder="例如：wuyi101">
+    <button class="btn-main" onclick="saveSetup()">保存并进入</button>
+    <p class="tip">参数怎么拿？看页面最下面 👇 第一次配置好后，会生成邀请链接，朋友点开链接无需配置直接抽。</p>
+    <p class="tip"><b>LeanCloud 配置教程：</b><br>
+    ① 打开 leancloud.cn 注册/登录 → 控制台<br>
+    ② 「创建应用」选开发版（免费）<br>
+    ③ 应用 → 设置 → 应用凭证 → 复制 AppID、AppKey 填到上面<br>
+    ④ 存储 → 创建 Class，名字填 <b>Draw</b> → 创建<br>
+    ⑤ 点进 Draw 这个 Class → 权限 → 把「查询 find」和「新增 create」都设为「所有用户」，保存</p>
+  </div>
+
+  <!-- 主界面 -->
+  <div id="mainPanel" class="hidden" style="width:100%; display:flex; flex-direction:column; align-items:center;">
+    <div class="topbar">
+      <span>房间：<b id="roomShow"></b></span>
+      <button class="btn-small" onclick="exitSetup()">重新配置</button>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="mybar">
+      <input id="myName" placeholder="输入你的名字">
+      <button class="btn-draw" onclick="doDraw()">🎰 抽号</button>
+    </div>
+    <div class="groups" id="groups"></div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn-small" onclick="copyInvite()">📋 复制邀请链接</button>
+      <button class="btn-danger" onclick="resetAll()">↺ 全部重置</button>
+    </div>
+    <div class="share hidden" id="inviteBox"></div>
+  </div>
+
+<script>
+  const API = "https://api.leancloud.cn/1.1/classes/";
+  let cfg = {};
+  let myName = "";
+
+  // 从网址 # 参数或本地存储读配置
+  function loadCfg(){
+    const h = new URLSearchParams(location.hash.slice(1));
+    if(h.get("appid") && h.get("key") && h.get("room")){
+      cfg = {appId:h.get("appid"), appKey:h.get("key"), room:h.get("room")};
+      localStorage.setItem("cq_cfg", JSON.stringify(cfg));
+    } else {
+      const s = localStorage.getItem("cq_cfg");
+      if(s) cfg = JSON.parse(s);
+    }
+    if(cfg.appId && cfg.room){
+      document.getElementById("setupPanel").classList.add("hidden");
+      document.getElementById("mainPanel").classList.remove("hidden");
+      document.getElementById("roomShow").textContent = cfg.room;
+      showInvite();
+      refresh();
+      setInterval(refresh, 2000);
+    }
+  }
+
+  function saveSetup(){
+    cfg = {
+      appId: document.getElementById("appId").value.trim(),
+      appKey: document.getElementById("appKey").value.trim(),
+      room:   document.getElementById("room").value.trim()
+    };
+    if(!cfg.appId || !cfg.appKey || !cfg.room){ alert("三个都要填！"); return; }
+    localStorage.setItem("cq_cfg", JSON.stringify(cfg));
+    localStorage.setItem("cq_name", "");
+    location.hash = "";
+    location.reload();
+  }
+
+  function exitSetup(){
+    localStorage.removeItem("cq_cfg");
+    location.hash = "";
+    location.reload();
+  }
+
+  function showInvite(){
+    const link = location.origin + location.pathname + "#appid=" + cfg.appId + "&key=" + cfg.appKey + "&room=" + cfg.room;
+    const box = document.getElementById("inviteBox");
+    box.classList.remove("hidden");
+    box.textContent = "邀请链接（朋友点开直接抽）：" + link;
+  }
+
+  function copyInvite(){
+    const link = location.origin + location.pathname + "#appid=" + cfg.appId + "&key=" + cfg.appKey + "&room=" + cfg.room;
+    navigator.clipboard.writeText(link).then(()=>alert("已复制，发到微信群里吧！"));
+  }
+
+  async function lc(path, method, body){
+    const res = await fetch(API + cfg.room + path, {
+      method: method || "GET",
+      headers: {
+        "X-LC-Id": cfg.appId,
+        "X-LC-Key": cfg.appKey,
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(t);
+    }
+    return res.json();
+  }
+
+  async function refresh(){
+    try{
+      const data = await lc("?order=createdAt&limit=100");
+      render(data.results || []);
+    }catch(e){
+      document.getElementById("status").innerHTML = "⚠️ 连接失败：" + e.message.slice(0,80) + "（检查 AppID/AppKey/房间名/Class 权限）";
+    }
+  }
+
+  function render(records){
+    const total = records.length;
+    const status = document.getElementById("status");
+    status.innerHTML = "已抽 <b>" + total + "</b> / 12 人";
+    const groups = document.getElementById("groups");
+    groups.innerHTML = "";
+    for(let n=1;n<=6;n++){
+      const members = records.filter(r=>r.num===n);
+      const div = document.createElement("div");
+      div.className = "group";
+      const names = members.map(m => m.name===myName ? `<span class="me">${esc(m.name)}（你）</span>` : esc(m.name)).join("<br>") || "—";
+      div.innerHTML = `<h3>第 ${n} 组</h3><p>${names}</p>`;
+      groups.appendChild(div);
+    }
+  }
+
+  function esc(s){ const d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+  async function doDraw(){
+    myName = document.getElementById("myName").value.trim();
+    if(!myName){ alert("先输入你的名字！"); return; }
+    localStorage.setItem("cq_name", myName);
+    try{
+      const data = await lc("?order=createdAt&limit=100");
+      const records = data.results || [];
+      if(records.find(r=>r.name===myName)){ alert("你已经抽过啦！看下面的分组"); return; }
+      if(records.length >= 12){ alert("12 个人都抽完了！"); return; }
+      const counts = {};
+      records.forEach(r=>counts[r.num]=(counts[r.num]||0)+1);
+      const avail = [];
+      for(let n=1;n<=6;n++){ for(let i=0;i<2-(counts[n]||0);i++) avail.push(n); }
+      if(avail.length===0){ alert("号抽完了！"); return; }
+      const num = avail[Math.floor(Math.random()*avail.length)];
+      await lc("", "POST", {name:myName, num:num});
+      await refresh();
+      document.getElementById("status").innerHTML += `　🎉 你抽到了 <b>${num}</b> 号！`;
+    }catch(e){
+      alert("抽取出错：" + e.message.slice(0,100));
+    }
+  }
+
+  async function resetAll(){
+    if(!confirm("确定清空所有人的抽签结果，重新来一局？")) return;
+    try{
+      const data = await lc("?limit=100");
+      for(const r of (data.results||[])){
+        await lc("/" + r.objectId, "DELETE");
+      }
+      await refresh();
+    }catch(e){ alert("重置出错：" + e.message.slice(0,100)); }
+  }
+
+  // 记住名字
+  const savedName = localStorage.getItem("cq_name");
+  if(savedName) document.getElementById("myName").value = savedName;
+  document.getElementById("myName").addEventListener("input", e=>localStorage.setItem("cq_name", e.target.value));
+
+  loadCfg();
+</script>
+</body>
+</html>
