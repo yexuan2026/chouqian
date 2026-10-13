@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抽签分组 - 12人抽6个号</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:"PingFang SC","Microsoft YaHei",sans-serif; }
+  body { min-height:100vh; background:linear-gradient(135deg,#1e3c72,#2a5298); display:flex; flex-direction:column; align-items:center; padding:20px; color:#fff; }
+  h1 { font-size:24px; margin:10px 0 4px; }
+  .subtitle { font-size:14px; opacity:.8; margin-bottom:16px; }
+  .names-bar { width:100%; max-width:720px; display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:16px; }
+  .name-chip { background:rgba(255,255,255,.15); padding:6px 14px; border-radius:20px; font-size:14px; cursor:pointer; transition:.2s; border:1px solid transparent; }
+  .name-chip:hover { background:rgba(255,255,255,.3); }
+  .name-chip.selected { background:#ffb347; color:#333; font-weight:bold; }
+  .controls { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; justify-content:center; }
+  button { border:none; padding:10px 22px; border-radius:24px; font-size:15px; cursor:pointer; transition:.2s; }
+  .btn-draw { background:#ffb347; color:#333; font-weight:bold; }
+  .btn-draw:hover { background:#ffc966; transform:scale(1.05); }
+  .btn-reset { background:rgba(255,255,255,.2); color:#fff; }
+  .btn-reset:hover { background:rgba(255,255,255,.35); }
+  .card-area { width:100%; max-width:720px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:20px; }
+  @media (max-width:560px){ .card-area{ grid-template-columns:repeat(3,1fr);} }
+  .card { background:#fff; color:#333; border-radius:12px; padding:14px 6px; text-align:center; cursor:pointer; user-select:none; box-shadow:0 4px 10px rgba(0,0,0,.25); transition:.3s; }
+  .card .num { font-size:34px; font-weight:bold; color:#1e3c72; }
+  .card .who { font-size:13px; margin-top:4px; color:#888; min-height:18px; }
+  .card.flipped { transform:rotateY(360deg); background:#e8f4ff; }
+  .card.done { cursor:default; }
+  .groups { width:100%; max-width:720px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  @media (max-width:560px){ .groups{ grid-template-columns:repeat(2,1fr);} }
+  .group { background:rgba(255,255,255,.12); border-radius:12px; padding:10px; min-height:70px; }
+  .group h3 { font-size:16px; color:#ffd27f; margin-bottom:6px; }
+  .group p { font-size:14px; line-height:1.6; }
+  .hint { font-size:13px; opacity:.7; margin-bottom:10px; }
+</style>
+</head>
+<body>
+  <h1>🎲 抽签分组</h1>
+  <p class="subtitle">12 个人依次抽号码（1~6 各 2 个），号码相同者为一组</p>
+
+  <div class="names-bar" id="namesBar"></div>
+  <p class="hint">先选中你的名字，再点一张卡片抽签</p>
+
+  <div class="controls">
+    <button class="btn-draw" onclick="autoDraw()">🎰 随机帮我抽</button>
+    <button class="btn-reset" onclick="resetAll()">↺ 重新开始</button>
+  </div>
+
+  <div class="card-area" id="cardArea"></div>
+
+  <div class="groups" id="groups"></div>
+
+<script>
+  const names = ["成员1","成员2","成员3","成员4","成员5","成员6","成员7","成员8","成员9","成员10","成员11","成员12"];
+  // 12 张卡片：1~6 各两张，洗牌
+  let deck = [];
+  let results = {};   // name -> number
+  let selectedName = null;
+
+  function initDeck(){
+    deck = [];
+    for(let n=1;n<=6;n++){ deck.push(n,n); }
+    for(let i=deck.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [deck[i],deck[j]]=[deck[j],deck[i]];
+    }
+  }
+
+  function renderNames(){
+    const bar = document.getElementById('namesBar');
+    bar.innerHTML='';
+    names.forEach(n=>{
+      const chip=document.createElement('div');
+      chip.className='name-chip'+(results[n]!==undefined?' done':'')+(selectedName===n?' selected':'');
+      chip.textContent = results[n]!==undefined ? `${n}（${results[n]}号）` : n;
+      if(results[n]===undefined){
+        chip.onclick=()=>{ selectedName=n; renderNames(); };
+      }
+      bar.appendChild(chip);
+    });
+  }
+
+  function renderCards(){
+    const area=document.getElementById('cardArea');
+    area.innerHTML='';
+    deck.forEach((num,idx)=>{
+      const card=document.createElement('div');
+      card.className='card';
+      card.innerHTML=`<div class="num">？</div><div class="who"></div>`;
+      card.onclick=()=>pick(idx,card);
+      area.appendChild(card);
+    });
+  }
+
+  function pick(idx,card){
+    if(card.classList.contains('done')) return;
+    if(!selectedName){ alert('请先在上方选中你的名字！'); return; }
+    if(results[selectedName]!==undefined){ alert('你已经抽过了！'); return; }
+    const num=deck[idx];
+    results[selectedName]=num;
+    card.classList.add('flipped','done');
+    card.querySelector('.num').textContent=num;
+    card.querySelector('.who').textContent=selectedName;
+    selectedName=null;
+    renderNames(); renderGroups();
+    if(Object.keys(results).length===12){
+      setTimeout(()=>alert('🎉 全员抽签完成！请看下方分组结果'),300);
+    }
+  }
+
+  function autoDraw(){
+    const left = names.filter(n=>results[n]===undefined);
+    if(left.length===0){ alert('已经全部抽完啦！'); return; }
+    selectedName = left[Math.floor(Math.random()*left.length)];
+    const cards=[...document.querySelectorAll('.card:not(.done)')];
+    const card=cards[Math.floor(Math.random()*cards.length)];
+    pick([...document.querySelectorAll('.card')].indexOf(card),card);
+  }
+
+  function renderGroups(){
+    const g=document.getElementById('groups');
+    g.innerHTML='';
+    for(let n=1;n<=6;n++){
+      const members=Object.keys(results).filter(k=>results[k]===n);
+      const div=document.createElement('div');
+      div.className='group';
+      div.innerHTML=`<h3>第 ${n} 组</h3><p>${members.join('<br>')||'—'}</p>`;
+      g.appendChild(div);
+    }
+  }
+
+  function resetAll(){
+    results={}; selectedName=null;
+    initDeck(); renderNames(); renderCards(); renderGroups();
+  }
+
+  initDeck(); renderNames(); renderCards(); renderGroups();
+</script>
+</body>
+</html>
